@@ -688,6 +688,7 @@ h1,h2,h3,h4 { margin: 0; }
   /* ================= 鉴权 ================= */
   function enter(pw) {
     if (pw === "070119") { activate("full"); }
+    else if (pw === "261001") { activate("bangkok"); }
     else {
       var g = $("gate");
       $("gate-err").textContent = "暗号不对哦，再试试";
@@ -1055,7 +1056,7 @@ h1,h2,h3,h4 { margin: 0; }
   renderChecklist();
   var saved = null;
   try { saved = sessionStorage.getItem(AUTH_KEY); } catch (e) {}
-  if (saved === "full") {
+  if (saved === "full" || saved === "bangkok") {
     activate(saved);          // 会话内已解锁，直接进入（清单条可见，不强制弹窗）
   } else {
     $("pw").focus();
