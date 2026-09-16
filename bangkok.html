@@ -1,0 +1,1066 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>曼谷 · 四人汇合 2026 旅行地图</title>
+<link rel="stylesheet" href="assets/leaflet/leaflet.css" />
+<script src="assets/leaflet/leaflet.js"></script>
+<style>
+/* ============ 主题 tokens（暖纸 + 手绘旅行手账风） ============ */
+:root {
+  --bg:        #F7F3EA;
+  --surface:   #FFFFFF;
+  --fg:        #332A22;
+  --muted:     #8A7F70;
+  --border:    #E6DCCC;
+  --accent:    #E96D4A;   /* 珊瑚橙 — 唯一强调色 */
+  --accent-soft: #FBE3D8;
+  --teal:      #2E9E8F;   /* 语义：完成 / 清迈 */
+  --bkk:       #E96D4A;   /* 曼谷城市色 = 强调色 */
+  --danger:    #C8503F;
+  --shadow:    0 6px 20px rgba(51,42,34,.10);
+
+  --font-display: "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", -apple-system, system-ui, sans-serif;
+  --font-body: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; padding: 0; width: 100%; height: 100%;
+  background: var(--bg); color: var(--fg);
+  font: 15px/1.5 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  touch-action: manipulation;
+}
+button { font-family: inherit; cursor: pointer; }
+h1,h2,h3,h4 { margin: 0; }
+
+/* ============ 密码门 ============ */
+#gate {
+  position: fixed; inset: 0; z-index: 9999;
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  transition: opacity .35s ease;
+}
+#gate.hidden { opacity: 0; pointer-events: none; }
+.gate-card {
+  width: 100%; max-width: 340px; text-align: center;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 22px; box-shadow: var(--shadow);
+  padding: 34px 26px 28px;
+}
+.gate-eyebrow {
+  font-size: 12px; letter-spacing: .14em; color: var(--muted);
+  text-transform: uppercase; margin-bottom: 10px;
+}
+.gate-title { font-family: var(--font-display); font-size: 30px; font-weight: 700; letter-spacing: -.01em; }
+.gate-sub { color: var(--muted); font-size: 14px; margin: 6px 0 4px; }
+.gate-squiggle { display: block; margin: 12px auto 4px; }
+.gate-input {
+  width: 100%; margin-top: 18px; text-align: center;
+  font-size: 26px; letter-spacing: .3em; font-weight: 600;
+  padding: 14px 12px; border: 1.5px solid var(--border); border-radius: 14px;
+  background: var(--bg); color: var(--fg); outline: none;
+  font-variant-numeric: tabular-nums;
+}
+.gate-input:focus { border-color: var(--accent); }
+.gate-err { color: var(--danger); font-size: 13px; min-height: 20px; margin-top: 8px; }
+.gate-btn {
+  width: 100%; margin-top: 6px; min-height: 50px;
+  background: var(--accent); color: #fff; border: 0; border-radius: 14px;
+  font-size: 16px; font-weight: 600; letter-spacing: .06em;
+  transition: transform .08s ease, filter .15s ease;
+}
+.gate-btn:active { transform: translateY(1px); filter: brightness(.96); }
+.gate-hint { margin-top: 18px; font-size: 12px; color: var(--muted); }
+.gate.shake .gate-card { animation: shake .4s ease; }
+@keyframes shake {
+  0%,100% { transform: translateX(0); }
+  20%,60% { transform: translateX(-8px); }
+  40%,80% { transform: translateX(8px); }
+}
+
+/* ============ App 骨架 ============ */
+#app { position: fixed; inset: 0; opacity: 0; transition: opacity .4s ease; }
+#app.show { opacity: 1; }
+#map { position: absolute; inset: 0; background: #EAE5D8; z-index: 0; }
+.map-fallback {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  color: var(--muted); padding: 24px; text-align: center;
+}
+/* 底图用 Carto 高清瓦片，不加任何滤镜保证清晰 */
+#map .leaflet-tile { filter: none; }
+
+/* 正北指示：Leaflet 本身不旋转，地图始终正北朝上 */
+.compass {
+  position: absolute; top: calc(142px + env(safe-area-inset-top)); right: 10px;
+  z-index: 1100;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  width: 40px; height: 48px; gap: 1px;
+  background: rgba(255,255,255,.92); backdrop-filter: blur(8px);
+  border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow);
+  pointer-events: none;
+}
+.compass svg { width: 15px; height: 15px; color: var(--accent); }
+.compass .c-n { font-size: 10px; font-weight: 700; color: var(--fg); letter-spacing: .02em; }
+
+/* 地图上浮层通用 */
+.overlay { position: absolute; z-index: 1100; }
+
+/* ============ 顶栏 ============ */
+.topbar {
+  top: calc(10px + env(safe-area-inset-top)); left: 10px;
+  max-width: calc(100% - 20px);
+  background: rgba(255,255,255,.94); backdrop-filter: blur(8px);
+  border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow);
+  padding: 10px 12px; display: flex; align-items: center; gap: 10px;
+}
+.topbar .tb-main { flex: 1; min-width: 0; }
+.tb-title { font-family: var(--font-display); font-size: 17px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; }
+.tb-sub { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-btn {
+  flex: none; min-height: 36px; min-width: 36px; padding: 0 10px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  color: var(--fg); font-size: 12.5px; display: inline-flex; align-items: center; gap: 5px;
+}
+.tb-btn:active { background: var(--accent-soft); }
+.tb-btn svg { width: 15px; height: 15px; }
+
+/* ============ 日期标签 ============ */
+#date-tabs {
+  top: calc(78px + env(safe-area-inset-top)); left: 0; right: 0;
+  display: flex; gap: 8px; padding: 0 12px;
+  overflow-x: auto; scrollbar-width: none;
+}
+#date-tabs::-webkit-scrollbar { display: none; }
+.date-chip {
+  flex: none; display: flex; flex-direction: column; align-items: center;
+  min-height: 52px; min-width: 58px; padding: 7px 10px 6px;
+  background: rgba(255,255,255,.92); border: 1px solid var(--border); border-radius: 13px;
+  color: var(--fg); transition: transform .08s ease;
+}
+.date-chip .d { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+.date-chip .w { font-size: 10px; color: var(--muted); margin-top: 1px; }
+.date-chip::after { content: ""; width: 7px; height: 7px; border-radius: 50%; margin-top: 4px; background: var(--teal); }
+.date-chip[data-city="bkk"]::after { background: var(--bkk); }
+.date-chip.active {
+  background: var(--fg); border-color: var(--fg); color: #fff;
+  box-shadow: var(--shadow);
+}
+.date-chip.active .w { color: rgba(255,255,255,.65); }
+
+/* ============ 清单条（始终可见） ============ */
+#bottom {
+  left: 0; right: 0; bottom: 0;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 0 10px calc(10px + env(safe-area-inset-bottom));
+}
+#check-bar {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 15px;
+  box-shadow: var(--shadow); padding: 10px 12px;
+  display: flex; align-items: center; gap: 10px; min-height: 52px;
+}
+#check-bar.bump { animation: bump 1.4s ease 2; }
+@keyframes bump { 0%,100% { transform: translateY(0); } 30% { transform: translateY(-4px); } 60% { transform: translateY(0); } }
+.check-ic {
+  flex: none; width: 34px; height: 34px; border-radius: 10px;
+  background: var(--accent-soft); color: var(--accent);
+  display: grid; place-items: center;
+}
+.check-ic svg { width: 18px; height: 18px; }
+.check-info { flex: 1; min-width: 0; }
+.check-title { font-size: 13.5px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+.check-title .ct-count { font-size: 11px; color: var(--accent); font-weight: 700; }
+.check-meter { height: 5px; background: var(--border); border-radius: 999px; margin-top: 6px; overflow: hidden; }
+.check-meter i { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width .3s ease; }
+.check-toggle {
+  flex: none; min-height: 34px; padding: 0 10px; border-radius: 10px;
+  background: var(--accent); color: #fff; border: 0; font-size: 12.5px; font-weight: 600;
+}
+.check-toggle:active { filter: brightness(.95); }
+
+/* ============ 底部控制面板 ============ */
+#panel {
+  background: rgba(255,255,255,.97); backdrop-filter: blur(8px);
+  border: 1px solid var(--border); border-radius: 18px;
+  box-shadow: var(--shadow);
+  padding: 10px 12px;
+}
+.panel-head { display: flex; align-items: flex-start; gap: 8px; }
+.panel-date { font-family: var(--font-display); font-size: 18px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; }
+.pill {
+  display: inline-flex; align-items: center; height: 20px; padding: 0 8px;
+  border-radius: 999px; font-size: 11px; font-weight: 600; flex: none; margin-top: 2px;
+}
+.pill.cm { background: #E3F3EF; color: #23725F; }
+.pill.bkk { background: var(--accent-soft); color: #B44A2E; }
+.panel-daytitle { font-size: 12px; color: var(--muted); margin-top: 1px; }
+.panel-scheme { margin-top: 7px; display: flex; align-items: flex-start; gap: 7px; }
+.scheme-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-top: 5px; }
+.scheme-name { font-size: 13.5px; font-weight: 700; }
+.scheme-note { font-size: 12px; color: var(--muted); margin-top: 1px; }
+.recenter {
+  flex: none; min-width: 36px; height: 36px; margin-left: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  color: var(--fg); display: grid; place-items: center;
+}
+.recenter svg { width: 16px; height: 16px; }
+.scheme-label { margin-top: 9px; font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: .02em; }
+#scheme-row { display: flex; gap: 7px; margin-top: 6px; overflow-x: auto; scrollbar-width: none; }
+#scheme-row::-webkit-scrollbar { display: none; }
+.scheme-btn {
+  flex: none; min-width: 100px; max-width: 132px;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  padding: 7px 10px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--surface); text-align: left;
+}
+.scheme-btn .sb-top { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--muted); font-weight: 600; }
+.scheme-btn .sb-top svg { width: 12px; height: 12px; }
+.scheme-btn .sb-name {
+  font-size: 12.5px; font-weight: 700; color: var(--fg); line-height: 1.25;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.scheme-btn.active { border-color: var(--fg); background: var(--fg); }
+.scheme-btn.active .sb-top { color: rgba(255,255,255,.75); }
+.scheme-btn.active .sb-name { color: #fff; }
+#cat-chips { display: flex; gap: 7px; margin-top: 9px; overflow-x: auto; scrollbar-width: none; }
+#cat-chips::-webkit-scrollbar { display: none; }
+.cat-chip {
+  flex: none; min-height: 34px; padding: 0 13px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--border); color: var(--muted);
+  font-size: 12.5px; display: inline-flex; align-items: center;
+}
+.cat-chip .dot { width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; }
+.cat-chip.active { background: var(--fg); border-color: var(--fg); color: #fff; }
+.cat-chip.active .dot { box-shadow: 0 0 0 2px rgba(255,255,255,.35); }
+
+/* ============ 清单抽屉 ============ */
+#check-sheet {
+  left: 0; right: 0; bottom: 0; z-index: 1200;
+  background: var(--surface); border-radius: 20px 20px 0 0;
+  box-shadow: 0 -10px 30px rgba(51,42,34,.18);
+  transform: translateY(105%); transition: transform .3s cubic-bezier(.22,.9,.28,1);
+  max-height: 72%; display: flex; flex-direction: column;
+}
+#check-sheet.open { transform: translateY(0); }
+.sheet-grip { width: 40px; height: 4px; border-radius: 999px; background: var(--border); margin: 10px auto 0; }
+.sheet-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px 8px; }
+.sheet-title { font-family: var(--font-display); font-size: 19px; font-weight: 700; }
+.sheet-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.sheet-close {
+  margin-left: auto; flex: none; min-width: 40px; height: 40px; border-radius: 11px;
+  background: var(--bg); border: 0; color: var(--fg); font-size: 15px;
+}
+.sheet-body { overflow-y: auto; padding: 4px 16px calc(16px + env(safe-area-inset-bottom)); }
+.ck-group { margin-top: 12px; }
+.ck-group-title { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .04em; margin-bottom: 4px; }
+.ck-item {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  background: none; border: 0; text-align: left; padding: 10px 2px;
+  border-bottom: 1px solid var(--border); color: var(--fg); font-size: 14px;
+}
+.ck-item:last-child { border-bottom: 0; }
+.ck-box {
+  flex: none; width: 22px; height: 22px; border-radius: 7px; border: 1.5px solid var(--border);
+  display: grid; place-items: center; transition: all .15s ease; background: var(--surface);
+}
+.ck-box svg { width: 13px; height: 13px; color: #fff; opacity: 0; }
+.ck-item.on .ck-box { background: var(--accent); border-color: var(--accent); }
+.ck-item.on .ck-box svg { opacity: 1; }
+.ck-item.on .ck-text { color: var(--muted); text-decoration: line-through; }
+.ck-text { flex: 1; }
+.sheet-foot { display: flex; gap: 10px; padding: 0 16px 16px; }
+.sheet-reset {
+  flex: 1; min-height: 46px; border-radius: 13px; background: var(--bg);
+  border: 1px solid var(--border); color: var(--muted); font-size: 14px; font-weight: 600;
+}
+.sheet-done { flex: 1.4; min-height: 46px; border-radius: 13px; background: var(--accent); border: 0; color: #fff; font-size: 14px; font-weight: 600; }
+
+/* ============ 地图标记 ============ */
+.leaflet-popup-content-wrapper { border-radius: 14px; box-shadow: var(--shadow); }
+.leaflet-popup-content { margin: 12px 14px; font-family: var(--font-body); }
+.pop { min-width: 210px; max-width: 264px; }
+.pop-cat {
+  display: inline-block; font-size: 10.5px; font-weight: 700; color: #fff;
+  padding: 3px 9px; border-radius: 999px; letter-spacing: .04em; margin-bottom: 6px;
+  border: 0; cursor: pointer; font-family: inherit;
+}
+.pop h4 { font-size: 15px; margin: 0 0 2px; }
+.pop p { font-size: 12.5px; color: var(--muted); margin: 0; line-height: 1.5; }
+.pop p.pop-intro { margin-bottom: 8px; }
+.pop-detail { border-top: 1px solid var(--border); padding-top: 6px; margin-bottom: 8px; }
+.pd-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 2.5px 0; }
+.pd-row span:first-child { color: var(--muted); flex: none; }
+.pd-row span:last-child { color: var(--fg); text-align: right; font-weight: 500; }
+.pop-nearby {
+  display: block; width: 100%; margin-top: 2px; min-height: 34px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--fg); font-size: 12px; font-weight: 600;
+}
+.pop-nearby:active { background: var(--accent-soft); }
+.nearby-list { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.nb-title { font-size: 11px; color: var(--muted); font-weight: 700; }
+.nb-item {
+  display: flex; align-items: center; gap: 7px; width: 100%; min-height: 32px; padding: 0 9px;
+  border-radius: 9px; border: 1px solid var(--border); background: var(--surface); color: var(--fg); font-size: 12.5px; text-align: left;
+}
+.nb-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.nb-empty { font-size: 12px; color: var(--muted); padding: 4px 2px; }
+.ava-wrap { text-align: center; }
+.ava {
+  width: 40px; height: 40px; border-radius: 50%; margin: 0 auto;
+  border: 2.5px solid var(--ring, #fff); background: #fff; overflow: hidden;
+  box-shadow: 0 2px 7px rgba(0,0,0,.28);
+}
+.ava img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ava-tag {
+  display: inline-block; margin-top: 2px; font-size: 10px; font-weight: 700;
+  background: rgba(255,255,255,.94); color: var(--fg); padding: 1px 6px;
+  border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+.pulse-pin {
+  width: 18px; height: 18px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 0 0 rgba(233,109,74,.55); animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(233,109,74,.5); }
+  70% { box-shadow: 0 0 0 16px rgba(233,109,74,0); }
+  100% { box-shadow: 0 0 0 0 rgba(233,109,74,0); }
+}
+/* 路线打卡点：编号圆点（按分类着色）+ 名称标签 */
+.rpin { display: flex; flex-direction: column; align-items: center; }
+.rpin-dot {
+  width: 26px; height: 26px; border-radius: 50%; border: 2.5px solid #fff;
+  box-shadow: 0 1px 5px rgba(0,0,0,.35); color: #fff; font-size: 12px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; line-height: 1;
+}
+.rpin-label {
+  margin-top: 3px; padding: 2px 6px; background: rgba(255,255,255,.94); color: var(--fg);
+  font-size: 11px; font-weight: 600; border-radius: 6px; white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(0,0,0,.18); max-width: 130px; overflow: hidden; text-overflow: ellipsis;
+}
+/* 缩放控件挪到右下方并抬高，避开底部面板 */
+.leaflet-bottom.leaflet-right { margin-bottom: 320px; }
+</style>
+</head>
+<body>
+
+<!-- ============ 密码门 ============ -->
+<div id="gate">
+  <div class="gate-card">
+    <div class="gate-eyebrow">Bangkok · Meetup 2026</div>
+    <h1 class="gate-title">曼谷 · 四人汇合</h1>
+    <div class="gate-sub">旅行地图 · 曼谷汇合版</div>
+    <svg class="gate-squiggle" width="74" height="9" viewBox="0 0 74 9" aria-hidden="true">
+      <path d="M2 6 Q 9 1 17 6 T 33 6 T 49 6 T 65 6" stroke="#E96D4A" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    </svg>
+    <input id="pw" class="gate-input" type="password" inputmode="numeric" maxlength="6" placeholder="••••••" autocomplete="off" />
+    <div id="gate-err" class="gate-err"></div>
+    <button id="gate-btn" class="gate-btn" type="button">进入地图</button>
+    <div class="gate-hint">输入你们的暗号，解锁本次行程</div>
+  </div>
+</div>
+
+<!-- ============ 主应用 ============ -->
+<div id="app">
+  <div id="map"></div>
+  <div class="compass overlay" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V5"/><path d="M7 10l5-5 5 5"/></svg>
+    <span class="c-n">北</span>
+  </div>
+
+  <header class="topbar overlay">
+    <div class="tb-main">
+      <div class="tb-title">清迈 · 曼谷 2026</div>
+      <div class="tb-sub" id="tb-sub">底图 © OpenStreetMap © CARTO · 坐标约略 · 详情待导入收藏 CSV</div>
+    </div>
+    <button class="tb-btn" id="btn-overview" type="button" style="display:none">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5 13 13l-4.5 2.5L11 11z"/></svg>
+      总览
+    </button>
+    <button class="tb-btn" id="btn-lock" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+      锁定
+    </button>
+  </header>
+
+  <nav id="date-tabs" class="overlay" aria-label="日期切换"></nav>
+
+  <div id="bottom" class="overlay">
+  <div id="check-bar">
+    <div class="check-ic">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2.5"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>
+    </div>
+    <div class="check-info">
+      <div class="check-title">旅行确认清单 <span class="ct-count" id="check-count">0/0</span></div>
+      <div class="check-meter"><i id="check-meter" style="width:0%"></i></div>
+    </div>
+    <button class="check-toggle" id="check-toggle" type="button">展开</button>
+  </div>
+
+  <div id="panel">
+    <div class="panel-head">
+      <span class="panel-date" id="panel-date">09-26</span>
+      <span class="pill cm" id="panel-city">清迈</span>
+      <button class="recenter" id="btn-recenter" type="button" title="回到当天">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+      </button>
+    </div>
+    <div class="panel-daytitle" id="panel-daytitle">上海 → 清迈</div>
+    <div class="panel-scheme">
+      <span class="scheme-dot"></span>
+      <div>
+        <div class="scheme-name" id="scheme-name">推荐路线</div>
+        <div class="scheme-note" id="scheme-note"></div>
+      </div>
+    </div>
+    <div class="scheme-label">攻略方案（点一下切换打卡点）</div>
+    <div id="scheme-row"></div>
+    <div id="cat-chips"></div>
+  </div>
+  </div>
+
+  <div id="check-sheet" class="overlay">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head">
+      <div>
+        <div class="sheet-title">旅行确认清单</div>
+        <div class="sheet-sub">出发前一项项勾掉，心里有底</div>
+      </div>
+      <button class="sheet-close" id="sheet-close" type="button">✕</button>
+    </div>
+    <div class="sheet-body" id="sheet-body"></div>
+    <div class="sheet-foot">
+      <button class="sheet-reset" id="sheet-reset" type="button">重置全部</button>
+      <button class="sheet-done" id="sheet-done" type="button">完成，收起</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var AUTH_KEY = "trip-auth-v1";
+  var LIST_KEY = "trip-checklist-v1";
+  var SHEET_SHOWN = "trip-sheet-shown";
+
+  /* ================= 地点数据（攻略正文 + 少量知名锚点，坐标约略） ================= */
+  var SPOTS = {
+    cnx:          { name:"清迈国际机场",       cat:"交通",  city:"cm",  lat:18.7666, lng:98.9626, intro:"春秋 9C8979 · 上海 19:35 → 23:10 落地" },
+    sabai:        { name:"萨拜萨拜酒店",       cat:"住宿",  city:"cm",  lat:18.7950, lng:98.9670, intro:"4 晚 · 豪华大床 + 至尊特大床 · 携程拿去花3期" },
+    nimman:       { name:"宁曼路",             cat:"景点",  city:"cm",  lat:18.7960, lng:98.9670, intro:"文艺街区，咖啡 / 买手店 / 小馆集中" },
+    maya:         { name:"MAYA 商场",          cat:"商场",  city:"cm",  lat:18.8000, lng:98.9670, intro:"宁曼北端，吃喝买一站式" },
+    oneNimman:    { name:"One Nimman · 宁曼一号", cat:"买手店", city:"cm", lat:18.7975, lng:98.9680, intro:"生活方式商场 · 服饰 / 香氛 / 手作 / 咖啡" },
+    riversRoads:  { name:"Rivers & Roads 女装", cat:"服饰",  city:"cm",  lat:18.7958, lng:98.9682, intro:"宁曼小众女装 / 棉麻 · 小萌主战场" },
+    herbbasics:   { name:"Herb Basics 草本",  cat:"香氛",  city:"cm",  lat:18.7868, lng:98.9885, intro:"清迈草本香氛 / 洗护 · 机场也有店" },
+    journal:      { name:"Journal 香氛",       cat:"香氛",  city:"cm",  lat:18.7980, lng:98.9685, intro:"清迈本土香水品牌 · 香薰 / 蜡烛" },
+    fahlanna:     { name:"Fah Lanna Spa",      cat:"SPA",   city:"cm",  lat:18.7980, lng:98.9680, intro:"口碑天花板，需提前订" },
+    "oasis-cnx":  { name:"Oasis Spa · 宁曼",   cat:"SPA",   city:"cm",  lat:18.7930, lng:98.9670, intro:"五星环境，出片" },
+    letsrelaxNim: { name:"Let's Relax · 宁曼", cat:"SPA",   city:"cm",  lat:18.7980, lng:98.9685, intro:"性价比连锁，好订、价格透明" },
+    makkha:       { name:"Makkha Health & Spa",cat:"SPA",   city:"cm",  lat:18.7885, lng:98.9890, intro:"人气高，结束有芒果糯米饭" },
+    zira:         { name:"Zira Spa",           cat:"SPA",   city:"cm",  lat:18.7870, lng:98.9890, intro:"观光局认证" },
+    lila:         { name:"Lila Thai Massage",  cat:"SPA",   city:"cm",  lat:18.7870, lng:98.9860, intro:"女子监狱按摩 · 200–400 铢档，可当场排" },
+    calm:         { name:"Calm Massage & Spa", cat:"SPA",   city:"cm",  lat:18.7890, lng:98.9820, intro:"中档 · Klook 可订" },
+    antique:      { name:"Antique Massage",    cat:"SPA",   city:"cm",  lat:18.7780, lng:98.9820, intro:"已收藏 · 瓦莱路步行街店" },
+    sundayMkt:    { name:"周日夜市",           cat:"市集",  city:"cm",  lat:18.7870, lng:98.9910, intro:"周日傍晚起 · 古城主干道 · 周末限定" },
+    ristr8to:     { name:"Ristr8to 咖啡",      cat:"咖啡",  city:"cm",  lat:18.7860, lng:98.9860, intro:"古城名店 · 拉花冠军" },
+    graphCafe:    { name:"Graph Café",         cat:"咖啡",  city:"cm",  lat:18.7965, lng:98.9675, intro:"宁曼小店，拍照友好" },
+    akhaAma:      { name:"Akha Ama Coffee",    cat:"咖啡",  city:"cm",  lat:18.7880, lng:98.9840, intro:"本土精品咖啡 · 古城 Phra Singh" },
+    huenPhen:     { name:"Huen Phen 泰北菜",   cat:"餐厅",  city:"cm",  lat:18.7820, lng:98.9860, intro:"古城老牌 · 泰北咖喱面" },
+    tongtemtoh:   { name:"Tong Tem Toh 泰北菜", cat:"餐厅", city:"cm",  lat:18.7970, lng:98.9640, intro:"宁曼 Soi 11 · 地道泰北菜" },
+    playworks:    { name:"Playworks",          cat:"买手店",city:"cm",  lat:18.7955, lng:98.9675, intro:"宁曼文创 / 文具" },
+    wualai:       { name:"瓦莱路 · 银器街",    cat:"首饰",  city:"cm",  lat:18.7780, lng:98.9810, intro:"银饰一条街 · 周六夜市所在地（日常也开）" },
+    baanKangWat:  { name:"Baan Kang Wat 艺术村", cat:"景点", city:"cm", lat:18.7785, lng:98.9535, intro:"艺术家社区 · 手作 / 陶瓷 / 咖啡" },
+    cmu:          { name:"清迈大学",           cat:"景点",  city:"cm",  lat:18.8030, lng:98.9510, intro:"校园 · 静心湖 · 校门口平价夜市" },
+    dmk:          { name:"廊曼机场 DMK",       cat:"交通",  city:"bkk", lat:13.9125, lng:100.6066, intro:"泰狮 SL515 · 18:45 → 20:00 落地" },
+    courtyard:    { name:"万怡 Sukhumvit 20",  cat:"住宿",  city:"bkk", lat:13.7360, lng:100.5600, intro:"2 晚 · 1.83m 特大床 · 俱乐部权益 · 免费取消至 09-29" },
+    barus:        { name:"Bar Us",             cat:"酒吧",  city:"bkk", lat:13.7370, lng:100.5605, intro:"素坤逸本地清吧 · 四人汇合点（22:00）" },
+    divana:       { name:"divana nurture spa", cat:"SPA",   city:"bkk", lat:13.7365, lng:100.5602, intro:"酒店同巷 · 最方便 · 已收藏" },
+    dreamhouse:   { name:"Dream House Thai Massage", cat:"SPA", city:"bkk", lat:13.7368, lng:100.5608, intro:"同巷平价 · 走路到" },
+    healthland:   { name:"Health Land Asoke",  cat:"SPA",   city:"bkk", lat:13.7420, lng:100.5610, intro:"老牌平价连锁 · 泰式 2h · 步行 10 分钟内" },
+    letsrelax39:  { name:"Let's Relax · Soi 39", cat:"SPA", city:"bkk", lat:13.7340, lng:100.5750, intro:"性价比连锁 · 有 Onsen 套餐" },
+    oasis31:      { name:"Oasis Spa · Soi 31", cat:"SPA",   city:"bkk", lat:13.7330, lng:100.5680, intro:"高端 · 环境好" },
+    lek:          { name:"Lek Massage",        cat:"SPA",   city:"bkk", lat:13.7350, lng:100.5610, intro:"Soi 22 平价 · 当地人气" },
+    t21:          { name:"Terminal 21 Asok",   cat:"商场",  city:"bkk", lat:13.7375, lng:100.5600, intro:"航站楼主题商场 · Asok 上盖" },
+    emquartier:   { name:"EmQuartier / Emporium", cat:"商场", city:"bkk", lat:13.7300, lng:100.5690, intro:"Phrom Phong 高端商圈" },
+    thecommons:   { name:"The COMMONS · Thonglor", cat:"买手店", city:"bkk", lat:13.7355, lng:100.5820, intro:"社区商业 · 买手店 / 餐厅" },
+    asiatique:    { name:"Asiatique 河畔夜市", cat:"市集",  city:"bkk", lat:13.7036, lng:100.5020, intro:"河畔摩天轮夜市 · 每日开" },
+    grandpalace:  { name:"大皇宫",             cat:"景点",  city:"bkk", lat:13.7500, lng:100.4913, intro:"曼谷地标 · 注意穿着" },
+    watArun:      { name:"郑王庙",             cat:"景点",  city:"bkk", lat:13.7437, lng:100.4888, intro:"黎明寺 · 河对岸" },
+    roast:        { name:"Roast Coffee & Eatery", cat:"咖啡", city:"bkk", lat:13.7305, lng:100.5693, intro:"EmQuartier 人气早午餐" },
+    somtumder:    { name:"Somtum Der",         cat:"餐厅",  city:"bkk", lat:13.7330, lng:100.5680, intro:"米其林推荐泰东北菜" },
+    gate43:       { name:"Gate43 机场酒店",    cat:"住宿",  city:"bkk", lat:13.6950, lng:100.7500, intro:"素万那普旁 · 10-02 住 1 晚" },
+    bkk:          { name:"素万那普机场 BKK",   cat:"交通",  city:"bkk", lat:13.6900, lng:100.7501, intro:"春秋 9C7286 · 08:40 起飞 · 05:40 前到" }
+  };
+
+  /* 每个点的补充信息（位置 / 档次 / 备注，来自攻略正文；未注明者为约略补充） */
+  var DETAILS = {
+    cnx:         [["航班","春秋 9C8979 PVG→CNX"],["时间","09-26 19:35 → 23:10"],["落地后","Grab 约 15 分钟到酒店"]],
+    sabai:       [["入住","09-26 → 09-30 · 4 晚"],["房型","豪华大床 + 至尊特大床"],["价格","¥1,258.76 · 拿去花3期"]],
+    nimman:      [["区域","宁曼路文艺街区"],["内容","咖啡 / 买手店 / 小馆"]],
+    maya:        [["类型","购物中心"],["位置","宁曼北端"]],
+    oneNimman:   [["类型","生活方式商场"],["内容","服饰 / 香氛 / 手作 / 咖啡"]],
+    riversRoads: [["类型","女装 / 棉麻"],["位置","宁曼"]],
+    herbbasics:  [["类型","草本香氛 / 洗护"],["备注","机场也有店"]],
+    journal:     [["类型","本土香水"],["备注","香薰 / 蜡烛"]],
+    fahlanna:    [["位置","宁曼"],["档次","中高档"],["备注","口碑天花板，需提前订"]],
+    "oasis-cnx": [["位置","宁曼"],["档次","高端"],["备注","五星环境，出片"]],
+    letsrelaxNim:[["位置","宁曼 / Tha Phae"],["档次","性价比连锁"],["备注","好订、价格透明"]],
+    makkha:      [["位置","古城 Rachadamnoen"],["档次","中高档"],["备注","结束有芒果糯米饭"]],
+    zira:        [["位置","古城"],["档次","中高档"],["备注","观光局认证"]],
+    lila:        [["位置","古城"],["档次","平价"],["备注","女子监狱按摩 · 200–400 铢 · 可当场排"]],
+    calm:        [["档次","中档"],["备注","Klook 可订"]],
+    antique:     [["位置","瓦莱路步行街"],["备注","已收藏"]],
+    sundayMkt:   [["时间","周日傍晚起 · 周末限定"],["位置","古城主干道"]],
+    ristr8to:    [["类型","古城咖啡名店"],["备注","拉花冠军"]],
+    graphCafe:   [["位置","宁曼"],["备注","拍照友好"]],
+    akhaAma:     [["类型","本土精品咖啡"],["位置","古城 Phra Singh"]],
+    huenPhen:    [["类型","泰北菜"],["位置","古城老牌"]],
+    tongtemtoh:  [["类型","泰北菜"],["位置","宁曼 Soi 11"]],
+    playworks:   [["类型","文创 / 文具"],["位置","宁曼"]],
+    wualai:      [["类型","银饰一条街"],["备注","周六夜市所在地 · 日常也开"]],
+    baanKangWat: [["类型","艺术家社区"],["内容","手作 / 陶瓷 / 咖啡"]],
+    cmu:         [["类型","大学校园"],["内容","静心湖 / 校门口夜市"]],
+    dmk:         [["航班","泰狮 SL515 CNX→DMK"],["时间","09-30 18:45 → 20:00"],["行李","小萌已购托运"]],
+    courtyard:   [["入住","09-30 → 10-02 · 2 晚"],["房型","1.83m 特大床 · 俱乐部权益"],["价格","¥1,824.88 · 3期免息"],["取消","免费取消截止 09-29 23:59"]],
+    barus:       [["类型","素坤逸本地社区清吧"],["时间","09-30 22:00 碰头"],["备注","离万怡近 · 12 点前撤"]],
+    divana:      [["位置","Soi 20"],["档次","高端"],["备注","酒店同巷 · 已收藏"]],
+    dreamhouse:  [["位置","Soi 20"],["档次","平价"],["备注","同巷，走路到"]],
+    healthland:  [["位置","Sukhumvit 21"],["档次","老牌平价连锁"],["备注","泰式 2h · 步行 10 分钟内"]],
+    letsrelax39: [["位置","Sukhumvit 39"],["档次","性价比连锁"],["备注","有 Onsen 套餐"]],
+    oasis31:     [["位置","Sukhumvit 31"],["档次","高端"],["备注","环境好"]],
+    lek:         [["位置","Sukhumvit 22"],["档次","平价"],["备注","当地人气，性价比高"]],
+    t21:         [["类型","航站楼主题商场"],["位置","Asok 上盖"]],
+    emquartier:  [["类型","高端商圈"],["位置","Phrom Phong"]],
+    thecommons:  [["类型","社区商业"],["位置","Thonglor"]],
+    asiatique:   [["类型","河畔摩天轮夜市"],["时间","每日开"]],
+    grandpalace: [["类型","曼谷地标"],["备注","注意穿着"]],
+    watArun:     [["类型","黎明寺"],["位置","河对岸"]],
+    roast:       [["位置","EmQuartier"],["备注","人气早午餐"]],
+    somtumder:   [["类型","泰东北菜"],["备注","米其林推荐"]],
+    gate43:      [["入住","10-02 → 10-03 · 1 晚"],["房型","池景豪华特大床房"],["价格","¥374.01"]],
+    bkk:         [["航班","春秋 9C7286 BKK→PVG"],["时间","10-03 08:40 → 14:10"],["提醒","05:40 前到机场"]]
+  };
+
+  /* ================= 四人 ================= */
+  var PEOPLE = [
+    { id:"kaikai",   name:"凯凯", img:"assets/kaikai.png",   color:"#3B82C4" },
+    { id:"xiaomeng", name:"小萌", img:"assets/xiaomeng.png", color:"#EC6A9C" },
+    { id:"fenda",    name:"芬达", img:"assets/fanta.png",    color:"#E98A3C" },
+    { id:"xiaolu",   name:"小鹿", img:"assets/chibi-1.webp", color:"#3FAE6E" }
+  ];
+  var AVATAR_OFFSETS = [ [-0.00055,-0.0004], [0.00055,-0.0004], [-0.0004,0.00035], [0.0004,0.00035] ];
+
+  /* ================= 每天（se=晴·有精力 / st=晴·累 / re=雨·有精力 / rt=雨·累） ================= */
+  var DAYS = [
+    { label:"09-26", wd:"周六", city:"cm",  title:"上海 → 清迈", center:[18.79,98.965], zoom:12,
+      spots:["cnx","sabai"],
+      schemes:{
+        se:{name:"落地直抵", note:"23:10 落地 → Grab 约 15 分钟到酒店，早点休息", stops:["cnx","sabai"]},
+        st:{name:"落地直抵", note:"落地即回酒店休息", stops:["cnx","sabai"]},
+        re:{name:"落地直抵（雨）", note:"备好雨具，Grab 直达酒店", stops:["cnx","sabai"]},
+        rt:{name:"落地直抵", note:"落地即休息，明天再逛", stops:["cnx","sabai"]} } },
+    { label:"09-27", wd:"周日", city:"cm",  title:"宁曼逛街 + 周日夜市", center:[18.7955,98.969], zoom:14,
+      spots:["sabai","nimman","oneNimman","riversRoads","herbbasics","journal","graphCafe","tongtemtoh","maya","sundayMkt","letsrelaxNim"],
+      schemes:{
+        se:{name:"买买买 + 周日夜市", note:"白天宁曼路 衣服·香氛·首饰逛个够，傍晚去古城周日夜市（周末限定）", stops:["sabai","oneNimman","riversRoads","journal","herbbasics","sundayMkt"]},
+        st:{name:"睡饱再逛", note:"睡到自然醒，咖啡 + 宁曼一号，傍晚周日夜市", stops:["sabai","graphCafe","oneNimman","sundayMkt"]},
+        re:{name:"雨天商场 + 夜市", note:"雨天逛 MAYA / 宁曼一号，晚上带伞去周日夜市", stops:["sabai","maya","oneNimman","sundayMkt"]},
+        rt:{name:"香氛 + 夜市", note:"就近逛香氛，缓过来再去周日夜市", stops:["sabai","herbbasics","sundayMkt","letsrelaxNim"]} } },
+    { label:"09-28", wd:"周一", city:"cm",  title:"艺术村 + 清迈大学", center:[18.791,98.952], zoom:13,
+      spots:["sabai","baanKangWat","cmu","akhaAma","huenPhen","tongtemtoh","makkha","lila","zira"],
+      schemes:{
+        se:{name:"艺术村 → 清迈大学", note:"上午艺术村手作，下午清迈大学静心湖，晚上古城咖啡 + 泰北菜", stops:["sabai","baanKangWat","cmu","akhaAma","huenPhen"]},
+        st:{name:"艺术村慢慢逛", note:"只去艺术村 + 附近咖啡", stops:["sabai","baanKangWat","akhaAma"]},
+        re:{name:"咖啡 + 泰北菜", note:"雨天走室内：咖啡 + 泰北菜 + SPA", stops:["sabai","akhaAma","tongtemtoh","makkha"]},
+        rt:{name:"咖啡 + SPA", note:"缓一缓，咖啡 + 平价按摩", stops:["sabai","akhaAma","lila"]} } },
+    { label:"09-29", wd:"周二", city:"cm",  title:"银器街首饰 + 补货", center:[18.788,98.978], zoom:13,
+      spots:["sabai","wualai","oneNimman","riversRoads","herbbasics","journal","tongtemtoh","antique","calm"],
+      schemes:{
+        se:{name:"银器街 + 宁曼补货", note:"上午瓦莱路挑银饰，下午回宁曼补衣服香氛，晚上泰北菜", stops:["sabai","wualai","oneNimman","riversRoads","tongtemtoh"]},
+        st:{name:"只逛银器街", note:"瓦莱路银饰 + 就近 Antique Massage", stops:["sabai","wualai","antique"]},
+        re:{name:"室内补货 + SPA", note:"雨天商场补货 + Calm SPA", stops:["sabai","oneNimman","journal","calm"]},
+        rt:{name:"酒店周边 SPA", note:"最后一天清迈，就近 SPA 放松", stops:["sabai","calm"]} } },
+    { label:"09-30", wd:"周三", city:"bkk", title:"四人曼谷汇合", center:[13.736,100.560], zoom:16, meetup:true,
+      spots:["dmk","courtyard","barus","divana","dreamhouse","healthland"],
+      schemes:{
+        se:{name:"四人汇合", note:"20:00 落地 DMK → 21:00-21:30 万怡放行李 → 22:00 Bar Us 碰头", stops:["dmk","courtyard","barus"]},
+        st:{name:"落地即汇合", note:"落地直奔万怡，就近 Bar Us", stops:["dmk","courtyard","barus"]},
+        re:{name:"雨天汇合", note:"提前 Grab 约车，注意堵车", stops:["dmk","courtyard","barus"]},
+        rt:{name:"汇合不折腾", note:"放行李后酒店旁 Bar Us", stops:["dmk","courtyard","barus"]} } },
+    { label:"10-01", wd:"周四", city:"bkk", title:"素坤逸逛街 + SPA", center:[13.736,100.564], zoom:14,
+      spots:["courtyard","divana","dreamhouse","healthland","t21","letsrelax39","oasis31","lek","emquartier","roast","somtumder"],
+      schemes:{
+        se:{name:"逛街 + SPA", note:"divana → T21 → EmQuartier → Health Land", stops:["courtyard","divana","t21","emquartier","roast","healthland"]},
+        st:{name:"酒店周边轻松", note:"同巷 divana + Dream House", stops:["courtyard","divana","dreamhouse"]},
+        re:{name:"商场室内日", note:"T21 → EmQuartier → Let's Relax 39", stops:["courtyard","t21","emquartier","letsrelax39"]},
+        rt:{name:"同巷 SPA 日", note:"divana + Health Land", stops:["courtyard","divana","healthland"]} } },
+    { label:"10-02", wd:"周五", city:"bkk", title:"曼谷地标 + 河畔夜市", center:[13.7155,100.655], zoom:11,
+      spots:["courtyard","thecommons","asiatique","grandpalace","watArun","gate43","bkk"],
+      schemes:{
+        se:{name:"地标 + 河畔夜市", note:"大皇宫 → 郑王庙 → Asiatique → 回机场酒店", stops:["courtyard","grandpalace","watArun","asiatique","gate43"]},
+        st:{name:"轻松收尾", note:"The COMMONS 逛吃 → 回机场酒店", stops:["courtyard","thecommons","gate43"]},
+        re:{name:"室内 + 河畔", note:"The COMMONS → Asiatique → 机场酒店", stops:["courtyard","thecommons","asiatique","gate43"]},
+        rt:{name:"提前去机场酒店", note:"早班机前一天，直接住 Gate43", stops:["courtyard","gate43"]} } },
+    { label:"10-03", wd:"周六", city:"bkk", title:"返程 · 上海", center:[13.693,100.750], zoom:12,
+      spots:["gate43","bkk"],
+      schemes:{
+        se:{name:"返程", note:"05:40 前到 BKK · 08:40 起飞 → 14:10 浦东", stops:["gate43","bkk"]},
+        st:{name:"返程", note:"05:40 前到 BKK", stops:["gate43","bkk"]},
+        re:{name:"返程", note:"05:40 前到 BKK，预留堵车时间", stops:["gate43","bkk"]},
+        rt:{name:"返程", note:"前一晚已住机场旁，05:40 前到 BKK", stops:["gate43","bkk"]} } }
+  ];
+
+  /* ================= 确认清单 ================= */
+  var CHECKLIST = [
+    { group:"证件 · 机票", items:[
+      { id:"passport", text:"护照有效期 ≥ 6 个月，确认泰国入境政策" },
+      { id:"flight1", text:"春秋 9C8979 上海→清迈 已出票（09-26 19:35）" },
+      { id:"flight2", text:"泰狮 SL515 清迈→曼谷 已订（09-30 18:45）" },
+      { id:"flight3", text:"春秋 9C7286 曼谷→上海 已出票（10-03 08:40）" },
+      { id:"itinerary", text:"打印 / 保存机票行程单 + 酒店确认单" }
+    ]},
+    { group:"酒店 · 出行", items:[
+      { id:"hotel1", text:"Sabai Sabai 清迈 4 晚（携程拿去花3期）" },
+      { id:"hotel2", text:"万怡 Sukhumvit 20 2 晚（免费取消截止 09-29 23:59）" },
+      { id:"hotel3", text:"Gate43 机场酒店 1 晚（10-02）" },
+      { id:"grab", text:"下载 Grab，提前约车（曼谷堵车）" },
+      { id:"luggage", text:"小萌 清迈→曼谷 已购托运" }
+    ]},
+    { group:"随身 · 预约", items:[
+      { id:"cash", text:"换泰铢现金 + 带银行卡" },
+      { id:"esim", text:"电话卡 / eSIM 流量" },
+      { id:"plug", text:"转换插头 + 充电宝" },
+      { id:"sunscreen", text:"防晒 + 雨具（10 月雨季）" },
+      { id:"med", text:"常用药：肠胃 / 防中暑" },
+      { id:"spa", text:"热门 SPA（Fah Lanna / Oasis）提前订" }
+    ]},
+    { group:"汇合 · 返程", items:[
+      { id:"meetup", text:"09-30 22:00 与芬达·小鹿 Bar Us 汇合" },
+      { id:"airport", text:"10-03 早班机：05:40 前到素万那普 BKK" }
+    ]}
+  ];
+
+  /* ================= 分类与颜色 ================= */
+  var CAT_ORDER = ["全部","住宿","交通","SPA","景点","咖啡","餐厅","酒吧","商场","市集","买手店","服饰","首饰","香氛"];
+  var CAT_COLORS = {
+    "住宿":"#4A7FB5", "交通":"#7A7F8C", "SPA":"#3E9E7B", "景点":"#B8533F",
+    "咖啡":"#8A6F4D", "餐厅":"#C04F48", "酒吧":"#B4632A", "商场":"#B58A3E",
+    "市集":"#C9803A", "买手店":"#7E6BB0", "服饰":"#C0477E", "首饰":"#5E7FA8", "香氛":"#4E8A6E"
+  };
+
+  /* ================= 状态 ================= */
+  var mode = null;             // 'full' | 'bangkok'
+  var currentDay = 0;
+  var weather = "sunny";
+  var energy = "energetic";
+  var cat = "全部";
+  var map, markerLayer, routeLayer;
+  var markerRegistry = {};
+
+  function $(id) { return document.getElementById(id); }
+
+  /* ================= 地图 ================= */
+  function initMap() {
+    if (!window.L) {
+      $("map").innerHTML = '<div class="map-fallback">地图组件未能加载</div>';
+      return;
+    }
+    /* 正北朝上：Leaflet 无旋转能力，地图恒为北向上（bearing 固定为 0） */
+    map = L.map("map", {
+      zoomControl: false, attributionControl: false,
+      zoomSnap: 0.5, zoomDelta: 0.5, minZoom: 3, maxZoom: 19
+    }).setView([18.79, 98.965], 12);
+    L.control.zoom({ position: "bottomright" }).addTo(map);
+    /* Carto Voyager 高清瓦片：国内可访问 + {r} 自动适配高清屏（@2x） */
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+      subdomains: "abcd",
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap &copy; CARTO"
+    }).addTo(map);
+    markerLayer = L.layerGroup().addTo(map);
+    routeLayer = L.layerGroup().addTo(map);
+  }
+
+  /* ================= 鉴权 ================= */
+  function enter(pw) {
+    if (pw === "261001") { activate("bangkok"); }
+    else {
+      var g = $("gate");
+      $("gate-err").textContent = "暗号不对哦，再试试";
+      g.classList.remove("shake"); void g.offsetWidth; g.classList.add("shake");
+    }
+  }
+
+  function activate(m) {
+    mode = m;
+    try { sessionStorage.setItem(AUTH_KEY, m); } catch (e) {}
+    $("gate").classList.add("hidden");
+    $("app").classList.add("show");
+    $("pw").value = "";
+    $("gate-err").textContent = "";
+    $("btn-overview").style.display = (m === "full") ? "" : "none";
+    $("tb-sub").textContent = (m === "full")
+      ? "全程地图 · 清迈 + 曼谷 · 底图 © OpenStreetMap"
+      : "曼谷汇合 · 四人起点 · 底图 © OpenStreetMap";
+    currentDay = (m === "bangkok") ? 4 : 0;
+    selectDay(currentDay);
+    if (map) map.invalidateSize();
+    // 打开时清晰可见清单：本会话首次自动展开，之后收起为清单条
+    try {
+      if (!sessionStorage.getItem(SHEET_SHOWN)) {
+        openSheet();
+        sessionStorage.setItem(SHEET_SHOWN, "1");
+      }
+    } catch (e) {}
+    $("check-bar").classList.add("bump");
+  }
+
+  function lock() {
+    try { sessionStorage.removeItem(AUTH_KEY); } catch (e) {}
+    mode = null;
+    $("app").classList.remove("show");
+    $("gate").classList.remove("hidden");
+    closeSheet();
+  }
+
+  /* ================= 日期 ================= */
+  function buildDateTabs() {
+    var host = $("date-tabs");
+    host.innerHTML = "";
+    DAYS.forEach(function (d, i) {
+      if (mode === "bangkok" && i < 4) return;
+      var el = document.createElement("button");
+      el.className = "date-chip" + (i === currentDay ? " active" : "");
+      el.setAttribute("data-city", d.city);
+      el.innerHTML = '<span class="d">' + d.label + '</span><span class="w">' + d.wd + '</span>';
+      el.onclick = function () { selectDay(i); };
+      host.appendChild(el);
+    });
+  }
+
+  function selectDay(i) {
+    currentDay = i;
+    buildDateTabs();
+    renderDay();
+  }
+
+  function renderDay() {
+    var d = DAYS[currentDay];
+    var scheme = d.schemes[schemeKey()];
+    updateDayHeader(d, scheme);
+    buildSchemeRow(d);
+    updateCatChips(d);
+    drawMarkers(d, scheme);
+    drawRoute(d, scheme);
+    if (map) map.flyTo(d.center, d.zoom, { duration: 0.6 });
+  }
+
+  function schemeKey() {
+    return (weather === "sunny" ? "s" : "r") + (energy === "energetic" ? "e" : "t");
+  }
+
+  function updateDayHeader(d, scheme) {
+    $("panel-date").textContent = d.label + " " + d.wd;
+    var pill = $("panel-city");
+    pill.textContent = (d.city === "cm") ? "清迈" : "曼谷";
+    pill.className = "pill " + (d.city === "cm" ? "cm" : "bkk");
+    $("panel-daytitle").textContent = d.title;
+    $("scheme-name").textContent = (d.meetup && mode === "bangkok" && currentDay === 4)
+      ? "四人汇合 · " + scheme.name : scheme.name;
+    $("scheme-note").textContent = scheme.note;
+  }
+
+  function updateCatChips(d) {
+    var present = {};
+    d.spots.forEach(function (id) { present[SPOTS[id].cat] = true; });
+    var cats = CAT_ORDER.filter(function (c) { return c === "全部" || present[c]; });
+    if (cats.indexOf(cat) < 0) cat = "全部";
+    var host = $("cat-chips");
+    host.innerHTML = "";
+    cats.forEach(function (c) {
+      var el = document.createElement("button");
+      el.className = "cat-chip" + (c === cat ? " active" : "");
+      var col = CAT_COLORS[c] || "#C9C2B4";
+      el.innerHTML = (c === "全部")
+        ? "全部"
+        : '<span class="dot" style="background:' + col + '"></span>' + c;
+      el.onclick = function () { cat = c; renderDay(); };
+      host.appendChild(el);
+    });
+  }
+
+  function buildSchemeRow(d) {
+    var host = $("scheme-row");
+    if (!host) return;
+    var sun = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+    var rain = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 15a4.5 4.5 0 0 0 0-9 5.5 5.5 0 0 0-10.6 1.4A3.7 3.7 0 0 0 7 15z"/><path d="M9 18v2M13 18v2M17 18v2"/></svg>';
+    var combos = [
+      { w:"sunny", e:"energetic", tag:"晴天 · 有精力", icon:sun },
+      { w:"sunny", e:"tired",     tag:"晴天 · 有点累", icon:sun },
+      { w:"rainy", e:"energetic", tag:"雨天 · 有精力", icon:rain },
+      { w:"rainy", e:"tired",     tag:"雨天 · 有点累", icon:rain }
+    ];
+    host.innerHTML = "";
+    combos.forEach(function (c) {
+      var sch = d.schemes[(c.w === "sunny" ? "s" : "r") + (c.e === "energetic" ? "e" : "t")];
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "scheme-btn" + (c.w === weather && c.e === energy ? " active" : "");
+      btn.innerHTML = '<span class="sb-top">' + c.icon + '<span>' + c.tag + '</span></span>' +
+        '<span class="sb-name">' + sch.name + '</span>';
+      btn.onclick = function () { weather = c.w; energy = c.e; renderDay(); };
+      host.appendChild(btn);
+    });
+  }
+
+  function showSet(d, scheme) {
+    if (cat !== "全部") return d.spots.filter(function (id) { return SPOTS[id].cat === cat; });
+    return scheme.stops.slice();
+  }
+  function dist(a, b) {
+    var dx = (b.lng - a.lng) * Math.cos((a.lat + b.lat) * Math.PI / 360);
+    var dy = b.lat - a.lat;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+  function makeMarker(s) {
+    var col = CAT_COLORS[s.cat] || "#C9C2B4";
+    var m = L.circleMarker([s.lat, s.lng], { radius: 8, color: "#fff", weight: 2.5, fillColor: col, fillOpacity: 1 });
+    m.bindPopup(popHtml(s));
+    return m;
+  }
+  function makeRoutePin(id, num) {
+    var s = SPOTS[id];
+    var col = CAT_COLORS[s.cat] || "#C9C2B4";
+    var icon = L.divIcon({
+      className: "",
+      html: '<div class="rpin"><span class="rpin-dot" style="background:' + col + '">' + num + '</span><span class="rpin-label">' + s.name + '</span></div>',
+      iconSize: [28, 40], iconAnchor: [14, 14]
+    });
+    var m = L.marker([s.lat, s.lng], { icon: icon });
+    m.bindPopup(popHtml(s));
+    return m;
+  }
+
+  /* ================= 标记 ================= */
+  function drawMarkers(d, scheme) {
+    if (!markerLayer) return;
+    markerLayer.clearLayers();
+    markerRegistry = {};
+    if (cat === "全部") {
+      scheme.stops.forEach(function (id, i) {
+        var m = makeRoutePin(id, i + 1);
+        markerLayer.addLayer(m);
+        markerRegistry[id] = m;
+      });
+    } else {
+      d.spots.forEach(function (id) {
+        if (SPOTS[id].cat !== cat) return;
+        var m = makeMarker(SPOTS[id]);
+        markerLayer.addLayer(m);
+        markerRegistry[id] = m;
+      });
+    }
+    if (d.meetup && cat === "全部") drawMeetup();
+  }
+
+  function popHtml(s) {
+    var col = CAT_COLORS[s.cat] || "#C9C2B4";
+    var dRows = (DETAILS[s.id] || []).map(function (r) {
+      return '<div class="pd-row"><span>' + r[0] + '</span><span>' + r[1] + '</span></div>';
+    }).join("");
+    return '<div class="pop">' +
+      '<button class="pop-cat" style="background:' + col + '" onclick="showNearby(\'' + s.id + '\')">' + s.cat + '</button>' +
+      '<h4>' + s.name + '</h4>' +
+      '<p class="pop-intro">' + s.intro + '</p>' +
+      (dRows ? '<div class="pop-detail">' + dRows + '</div>' : "") +
+      '<button class="pop-nearby" onclick="showNearby(\'' + s.id + '\')">查看附近「' + s.cat + '」</button>' +
+      '<div class="nearby-list" id="nearby-' + s.id + '"></div>' +
+      '</div>';
+  }
+
+  function showNearby(spotId) {
+    var s = SPOTS[spotId];
+    var box = document.getElementById("nearby-" + spotId);
+    if (!box) return;
+    if (box.getAttribute("data-open") === "1") {
+      box.innerHTML = ""; box.removeAttribute("data-open"); return;
+    }
+    var list = Object.keys(SPOTS).filter(function (id) {
+      var t = SPOTS[id];
+      return t.city === s.city && t.cat === s.cat && id !== spotId;
+    });
+    list.sort(function (a, b) { return dist(s, SPOTS[a]) - dist(s, SPOTS[b]); });
+    if (!list.length) {
+      box.innerHTML = '<div class="nb-empty">暂无其他「' + s.cat + '」</div>';
+    } else {
+      box.innerHTML = '<div class="nb-title">附近同类 · ' + s.cat + '</div>' + list.map(function (id) {
+        var t = SPOTS[id];
+        var col = CAT_COLORS[t.cat] || "#C9C2B4";
+        return '<button class="nb-item" onclick="openSpot(\'' + id + '\')"><span class="nb-dot" style="background:' + col + '"></span>' + t.name + '</button>';
+      }).join("");
+    }
+    box.setAttribute("data-open", "1");
+  }
+
+  function openSpot(id) {
+    var s = SPOTS[id];
+    if (!map) return;
+    map.flyTo([s.lat, s.lng], Math.max(map.getZoom(), 15), { duration: 0.5 });
+    setTimeout(function () {
+      if (markerRegistry[id]) { markerRegistry[id].openPopup(); }
+      else {
+        var m = makeMarker(s);
+        markerLayer.addLayer(m);
+        markerRegistry[id] = m;
+        m.openPopup();
+      }
+    }, 520);
+  }
+
+  window.showNearby = showNearby;
+  window.openSpot = openSpot;
+
+  function drawMeetup() {
+    var h = SPOTS.courtyard;
+    // 汇合脉冲点
+    var pin = L.marker([h.lat, h.lng], {
+      icon: L.divIcon({ className: "", html: '<div class="pulse-pin"></div>', iconSize: [18, 18], iconAnchor: [9, 9] })
+    });
+    pin.bindPopup('<div class="pop"><span class="pop-cat" style="background:#E96D4A">四人汇合</span>' +
+      '<h4>曼谷酒店汇合起点</h4><p>20:00 凯凯·小萌落地 DMK → 21:00-21:30 万怡放行李 → 22:00 与芬达·小鹿 Bar Us 碰头</p></div>');
+    markerLayer.addLayer(pin);
+    // 四人头像
+    PEOPLE.forEach(function (p, i) {
+      var off = AVATAR_OFFSETS[i];
+      var icon = L.divIcon({
+        className: "",
+        html: '<div class="ava-wrap"><div class="ava" style="--ring:' + p.color + '"><img src="' + p.img + '" alt="' + p.name + '"></div>' +
+              '<span class="ava-tag">' + p.name + '</span></div>',
+        iconSize: [48, 58], iconAnchor: [24, 30]
+      });
+      var m = L.marker([h.lat + off[0], h.lng + off[1]], { icon: icon });
+      m.bindPopup('<div class="pop"><h4>' + p.name + '</h4><p>09-30 曼谷四人汇合</p></div>');
+      markerLayer.addLayer(m);
+    });
+  }
+
+  /* ================= 路线 ================= */
+  function drawRoute(d, scheme) {
+    if (!routeLayer) return;
+    routeLayer.clearLayers();
+    if (cat !== "全部") return;
+    var coords = scheme.stops.map(function (id) {
+      return [SPOTS[id].lat, SPOTS[id].lng];
+    });
+    if (coords.length < 2) return;
+    var line = L.polyline(coords, {
+      color: "#E96D4A", weight: 4, opacity: 0.92, dashArray: "9 8", lineCap: "round", lineJoin: "round"
+    });
+    routeLayer.addLayer(line);
+  }
+
+  /* ================= 清单 ================= */
+  function readList() {
+    try { return JSON.parse(localStorage.getItem(LIST_KEY) || "{}"); } catch (e) { return {}; }
+  }
+  function writeList(o) { try { localStorage.setItem(LIST_KEY, JSON.stringify(o)); } catch (e) {} }
+  function totalCount() {
+    return CHECKLIST.reduce(function (n, g) { return n + g.items.length; }, 0);
+  }
+  function checkedCount() {
+    var o = readList();
+    return CHECKLIST.reduce(function (n, g) {
+      return n + g.items.filter(function (it) { return o[it.id]; }).length;
+    }, 0);
+  }
+  function renderChecklist() {
+    var o = readList();
+    var body = $("sheet-body");
+    body.innerHTML = "";
+    CHECKLIST.forEach(function (g) {
+      var h = document.createElement("div");
+      h.className = "ck-group-title";
+      h.textContent = g.group;
+      body.appendChild(h);
+      g.items.forEach(function (it) {
+        var row = document.createElement("button");
+        row.className = "ck-item" + (o[it.id] ? " on" : "");
+        row.type = "button";
+        row.innerHTML = '<span class="ck-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 10 17 19 7"/></svg></span>' +
+          '<span class="ck-text">' + it.text + '</span>';
+        row.onclick = function () { toggleItem(it.id); };
+        body.appendChild(row);
+      });
+    });
+    updateBar();
+  }
+  function toggleItem(id) {
+    var o = readList();
+    o[id] = !o[id];
+    writeList(o);
+    renderChecklist();
+  }
+  function resetList() {
+    writeList({});
+    renderChecklist();
+  }
+  function updateBar() {
+    var total = totalCount(), done = checkedCount();
+    $("check-count").textContent = done + "/" + total;
+    $("check-meter").style.width = (total ? Math.round(done / total * 100) : 0) + "%";
+  }
+  function openSheet() {
+    $("check-sheet").classList.add("open");
+    $("check-toggle").textContent = "收起";
+  }
+  function closeSheet() {
+    $("check-sheet").classList.remove("open");
+    $("check-toggle").textContent = "展开";
+  }
+
+  /* ================= 总览 ================= */
+  function overview() {
+    if (!map || !window.L) return;
+    var b = L.latLngBounds([[13.6900, 100.4888], [18.8048, 100.7501]]);
+    map.fitBounds(b, { padding: [40, 40] });
+  }
+
+  /* ================= 事件绑定 ================= */
+  function bindEvents() {
+    $("gate-btn").onclick = function () { enter($("pw").value.trim()); };
+    $("pw").addEventListener("keydown", function (e) { if (e.key === "Enter") enter($("pw").value.trim()); });
+    $("btn-lock").onclick = lock;
+    $("btn-overview").onclick = overview;
+    $("btn-recenter").onclick = function () {
+      var d = DAYS[currentDay];
+      if (map) map.flyTo(d.center, d.zoom, { duration: 0.5 });
+    };
+    /* 方案切换由 buildSchemeRow 内每个方案按钮的 onclick 处理 */
+    $("check-toggle").onclick = function () {
+      $("check-sheet").classList.contains("open") ? closeSheet() : openSheet();
+    };
+    $("sheet-close").onclick = closeSheet;
+    $("sheet-done").onclick = closeSheet;
+    $("sheet-reset").onclick = resetList;
+    window.addEventListener("resize", function () { if (map) map.invalidateSize(); });
+  }
+
+  /* ================= 启动 ================= */
+  initMap();
+  bindEvents();
+  renderChecklist();
+  var saved = null;
+  try { saved = sessionStorage.getItem(AUTH_KEY); } catch (e) {}
+  if (saved === "bangkok") {
+    activate(saved);          // 会话内已解锁，直接进入（清单条可见，不强制弹窗）
+  } else {
+    $("pw").focus();
+  }
+})();
+</script>
+</body>
+</html>
