@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>清迈 · 曼谷 2026 旅行地图</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Ctext%20y='.9em'%20font-size='90'%3E🗺️%3C/text%3E%3C/svg%3E" />
 <link rel="stylesheet" href="assets/leaflet/leaflet.css" />
 <script src="assets/leaflet/leaflet.js"></script>
 <style>
@@ -466,19 +467,29 @@ h1,h2,h3,h4 { margin: 0; }
     var plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv, tagLength: 128 }, key, buf);
     return new TextDecoder().decode(plain);
   }
-  async function boot(mode) {
-    var pw = (mode === "bangkok") ? "261001" : "070119";
-    var blob = (mode === "bangkok") ? ENC.bangkok : ENC.full;
+  function applyData(d) {
+    SPOTS = d.SPOTS; DETAILS = d.DETAILS; PEOPLE = d.PEOPLE; DAYS = d.DAYS; CHECKLIST = d.CHECKLIST; META = d.META;
+    renderChecklist();
+  }
+  async function tryUnlock(pw, mode, blob) {
     try {
-      var json = await decryptData(pw, blob);
-      var d = JSON.parse(json);
-      SPOTS = d.SPOTS; DETAILS = d.DETAILS; PEOPLE = d.PEOPLE; DAYS = d.DAYS; CHECKLIST = d.CHECKLIST; META = d.META;
-      renderChecklist();
+      var d = JSON.parse(await decryptData(pw, blob));
+      applyData(d);
       activate(mode);
-    } catch (e) {
-      $("gate-err").textContent = "解密失败，请刷新重试";
-      if (window.console) console.error(e);
-    }
+      return true;
+    } catch (e) { return false; }
+  }
+  function shake() {
+    var g = $("gate");
+    $("gate-err").textContent = "暗号不对哦，再试试";
+    g.classList.remove("shake"); void g.offsetWidth; g.classList.add("shake");
+  }
+  async function enter(pw) {
+    pw = (pw || "").trim();
+    if (!pw) { shake(); return; }
+    if (await tryUnlock(pw, "full", ENC.full)) { try { sessionStorage.setItem(AUTH_KEY, pw); } catch (e) {} return; }
+    if (await tryUnlock(pw, "bangkok", ENC.bangkok)) { try { sessionStorage.setItem(AUTH_KEY, pw); } catch (e) {} return; }
+    shake();
   }
 
 
@@ -537,19 +548,8 @@ h1,h2,h3,h4 { margin: 0; }
   }
 
   /* ================= 鉴权 ================= */
-  function enter(pw) {
-    if (pw === "070119") { boot("full"); }
-    else if (pw === "261001") { boot("bangkok"); }
-    else {
-      var g = $("gate");
-      $("gate-err").textContent = "暗号不对哦，再试试";
-      g.classList.remove("shake"); void g.offsetWidth; g.classList.add("shake");
-    }
-  }
-
   function activate(m) {
     mode = m;
-    try { sessionStorage.setItem(AUTH_KEY, m); } catch (e) {}
     $("gate").classList.add("hidden");
     $("app").classList.add("show");
     $("pw").value = "";
@@ -906,8 +906,8 @@ h1,h2,h3,h4 { margin: 0; }
   bindEvents();
   var saved = null;
   try { saved = sessionStorage.getItem(AUTH_KEY); } catch (e) {}
-  if (saved === "full" || saved === "bangkok") {
-    boot(saved);             // 会话内已解锁，自动解密进入
+  if (saved) {
+    enter(saved);            // 会话内已解锁，自动解密进入
   } else {
     $("pw").focus();
   }
